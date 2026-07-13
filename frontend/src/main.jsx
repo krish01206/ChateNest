@@ -6,12 +6,15 @@ import "./index.css";
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { SocketProvider } from "./context/SocketContext";
+import { NotificationProvider } from "./context/NotificationContext";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <BrowserRouter>
     <AuthProvider>
       <SocketProvider>
-        <App />
+        <NotificationProvider>
+          <App />
+        </NotificationProvider>
       </SocketProvider>
     </AuthProvider>
   </BrowserRouter>

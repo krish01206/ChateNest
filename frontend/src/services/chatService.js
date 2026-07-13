@@ -84,3 +84,12 @@ export const updateMessageApi = async (id, text) => {
   const res = await axiosInstance.put(`/messages/${id}`, { text }, getConfig());
   return res.data;
 };
+
+export const markSeenApi = async (conversationId) => {
+  const res = await axiosInstance.patch(
+    `/messages/seen/${conversationId}`,
+    {},
+    getConfig()
+  );
+  return res.data;
+};

@@ -1,13 +1,15 @@
 import { useEffect, useState, useContext } from "react";
-import { getUsers, createConversation, getConversations } from "../services/chatService";
+import { getUsers, createConversation, getConversations, markSeenApi } from "../services/chatService";
 import { AuthContext } from "../context/AuthContext";
 import { SocketContext } from "../context/SocketContext";
+import { NotificationContext } from "../context/NotificationContext";
 import { FiMessageSquare, FiUsers, FiSearch } from "react-icons/fi";
 
 function Sidebar({ setConversation, activeConversationId }) {
   const { user: currentUser } = useContext(AuthContext);
   const { socket, onlineUsers = [] } = useContext(SocketContext);
-  
+  const { unreadCounts, resetUnread, seedUnreadCounts } = useContext(NotificationContext);
+
   const [activeTab, setActiveTab] = useState("chats"); // "chats" or "contacts"
   const [users, setUsers] = useState([]);
   const [conversations, setConversations] = useState([]);
@@ -21,7 +23,7 @@ function Sidebar({ setConversation, activeConversationId }) {
   // Reload conversations when socket receives a new message
   useEffect(() => {
     if (!socket) return;
-    
+
     const handleRefreshConversations = () => {
       loadConversations();
     };
@@ -47,7 +49,10 @@ function Sidebar({ setConversation, activeConversationId }) {
   const loadConversations = async () => {
     try {
       const data = await getConversations();
-      setConversations(data.conversations || []);
+      const convs = data.conversations || [];
+      setConversations(convs);
+      // Seed initial unread counts from server response
+      seedUnreadCounts(convs);
     } catch (err) {
       console.log("Error loading conversations:", err);
     }
@@ -64,8 +69,20 @@ function Sidebar({ setConversation, activeConversationId }) {
     }
   };
 
-  const handleConversationClick = (conv) => {
+  const handleConversationClick = async (conv) => {
     setConversation(conv);
+    // Clear unread badge immediately in UI
+    resetUnread(conv._id);
+    // Tell server to mark messages as seen
+    try {
+      await markSeenApi(conv._id);
+    } catch (err) {
+      console.log("Error marking seen:", err);
+    }
+    // Inform socket server which conversation this user is now viewing
+    if (socket) {
+      socket.emit("setActiveConversation", conv._id);
+    }
   };
 
   // Filtering
@@ -145,6 +162,7 @@ function Sidebar({ setConversation, activeConversationId }) {
               filteredConversations.map((c) => {
                 const otherUser = c.members?.find((m) => m._id !== currentUser?._id);
                 const isActive = c._id === activeConversationId;
+                const unread = unreadCounts[c._id] || 0;
                 if (!otherUser) return null;
 
                 return (
@@ -154,7 +172,7 @@ function Sidebar({ setConversation, activeConversationId }) {
                     style={{
                       cursor: "pointer",
                       background: isActive ? "rgba(139, 92, 246, 0.12)" : "var(--bg-card)",
-                      borderColor: isActive ? "rgba(139, 92, 246, 0.3)" : "var(--border-glass)"
+                      borderColor: isActive ? "rgba(139, 92, 246, 0.3)" : unread > 0 ? "rgba(139, 92, 246, 0.2)" : "var(--border-glass)"
                     }}
                     onClick={() => handleConversationClick(c)}
                   >
@@ -169,21 +187,31 @@ function Sidebar({ setConversation, activeConversationId }) {
                             className="rounded-circle"
                             style={{ objectFit: "cover" }}
                           />
-                           <span className={`avatar-status-badge ${onlineUsers.includes(otherUser._id) ? "online" : "offline"}`} />
+                          <span className={`avatar-status-badge ${onlineUsers.includes(otherUser._id) ? "online" : "offline"}`} />
                         </div>
                         
-                        <div style={{ maxWidth: "160px" }}>
-                          <h6 className="mb-0 text-light fw-bold small text-truncate">{otherUser.name}</h6>
-                          <small className="text-secondary text-truncate d-block" style={{ fontSize: "0.75rem" }}>
+                        <div style={{ maxWidth: "140px" }}>
+                          <h6 className={`mb-0 small text-truncate ${unread > 0 ? "text-light fw-bold" : "text-light fw-bold"}`}>
+                            {otherUser.name}
+                          </h6>
+                          <small
+                            className={`text-truncate d-block ${unread > 0 ? "text-light" : "text-secondary"}`}
+                            style={{ fontSize: "0.75rem", fontWeight: unread > 0 ? "500" : "400" }}
+                          >
                             {c.lastMessage || "No messages yet"}
                           </small>
                         </div>
                       </div>
 
-                      <div className="text-end">
+                      <div className="text-end d-flex flex-column align-items-end gap-1">
                         <small className="text-secondary d-block" style={{ fontSize: "0.65rem" }}>
                           {formatTime(c.lastMessageAt)}
                         </small>
+                        {unread > 0 && (
+                          <span className="unread-badge">
+                            {unread > 99 ? "99+" : unread}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

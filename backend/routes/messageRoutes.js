@@ -17,7 +17,9 @@ getMessages,
 
 deleteMessage,
 
-updateMessage
+updateMessage,
+
+markSeen
 
 } = require("../controllers/messageController");
 
@@ -32,5 +34,7 @@ router.get("/:id", protect, getMessages);
 router.delete("/:id", protect, deleteMessage);
 
 router.put("/:id", protect, updateMessage);
+
+router.patch("/seen/:conversationId", protect, markSeen);
 
 module.exports = router;

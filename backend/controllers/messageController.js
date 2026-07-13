@@ -38,7 +38,7 @@ exports.createConversation = async (req, res) => {
     }
 };
 
-// Get User Conversations
+// Get User Conversations (with unread count per conversation)
 exports.getConversations = async (req, res) => {
     try {
         const conversations = await Conversation.find({
@@ -47,9 +47,21 @@ exports.getConversations = async (req, res) => {
         .populate("members", "-password")
         .sort({ lastMessageAt: -1 });
 
+        // Attach unread counts: messages in each conv addressed to current user that are unseen
+        const conversationsWithUnread = await Promise.all(
+            conversations.map(async (conv) => {
+                const unreadCount = await Message.countDocuments({
+                    conversationId: conv._id,
+                    receiver: req.user._id,
+                    seen: false
+                });
+                return { ...conv.toObject(), unreadCount };
+            })
+        );
+
         res.status(200).json({
             success: true,
-            conversations
+            conversations: conversationsWithUnread
         });
     } catch (error) {
         res.status(500).json({
@@ -148,43 +160,36 @@ console.log(req.body);
 };
 
 
-// Get Messages
-
+// Get Messages (and auto-mark them as seen for the current user)
 exports.getMessages = async (req, res) => {
-
     try {
-
         const messages = await Message.find({
-
             conversationId: req.params.id
-
         })
             .populate("sender", "name profilePic")
             .populate("receiver", "name profilePic")
             .sort({ createdAt: 1 });
 
+        // Mark all messages addressed to current user as seen
+        await Message.updateMany(
+            {
+                conversationId: req.params.id,
+                receiver: req.user._id,
+                seen: false
+            },
+            { $set: { seen: true } }
+        );
+
         res.status(200).json({
-
             success: true,
-
             messages
-
         });
-
-    }
-
-    catch (error) {
-
+    } catch (error) {
         res.status(500).json({
-
             success: false,
-
             message: error.message
-
         });
-
     }
-
 };
 
 
@@ -287,5 +292,23 @@ exports.updateMessage = async (req, res) => {
             success: false,
             message: error.message
         });
+    }
+};
+
+// Mark all messages in a conversation as seen (for badge reset)
+exports.markSeen = async (req, res) => {
+    try {
+        await Message.updateMany(
+            {
+                conversationId: req.params.conversationId,
+                receiver: req.user._id,
+                seen: false
+            },
+            { $set: { seen: true } }
+        );
+
+        res.status(200).json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
     }
 };

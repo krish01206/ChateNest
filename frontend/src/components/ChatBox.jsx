@@ -1,7 +1,8 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { SocketContext } from "../context/SocketContext";
-import { getMessages, sendMessageApi, deleteMessageApi, updateMessageApi } from "../services/chatService";
+import { NotificationContext } from "../context/NotificationContext";
+import { getMessages, sendMessageApi, deleteMessageApi, updateMessageApi, markSeenApi } from "../services/chatService";
 import { FiSend, FiMessageSquare, FiSmile, FiPaperclip, FiMoreVertical, FiClock, FiAlertCircle } from "react-icons/fi";
 
 const EMOJIS = [
@@ -19,6 +20,7 @@ const isImageFile = (url) => {
 function ChatBox({ conversation }) {
   const { user } = useContext(AuthContext);
   const { socket, onlineUsers = [] } = useContext(SocketContext);
+  const { resetUnread } = useContext(NotificationContext);
 
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -48,6 +50,15 @@ function ChatBox({ conversation }) {
       setMessages([]);
       setLoadingMessages(true);
 
+      // Tell the socket server which conversation is currently active (for unread suppression)
+      if (socket) {
+        socket.emit("setActiveConversation", conversation._id);
+      }
+      // Clear the unread badge for this conversation
+      resetUnread(conversation._id);
+      // Mark messages as seen on the server
+      markSeenApi(conversation._id).catch(() => {});
+
       const load = async () => {
         try {
           const data = await getMessages(conversation._id);
@@ -72,8 +83,12 @@ function ChatBox({ conversation }) {
 
     return () => {
       active = false;
+      // Clear active conversation tracking when component unmounts or conv changes
+      if (socket) {
+        socket.emit("setActiveConversation", null);
+      }
     };
-  }, [conversation]);
+  }, [conversation, socket]);
 
   // Smart Auto-Scroll: only scroll if the user is already near the bottom,
   // or if the updated messages trigger is caused by the user's own sent message.

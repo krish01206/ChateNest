@@ -433,3 +433,31 @@ body::after {
 .animate-pulse-offline {
   animation: pulse-offline 1.5s infinite ease-in-out;
 }
+
+/* Unread message badge pill */
+.unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 50px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #fff;
+  background: var(--accent-gradient);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+  animation: unread-pulse 2s ease-in-out infinite;
+  line-height: 1;
+}
+
+@keyframes unread-pulse {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 16px rgba(139, 92, 246, 0.7), 0 0 4px rgba(59, 130, 246, 0.4);
+  }
+}

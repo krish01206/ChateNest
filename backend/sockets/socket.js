@@ -1,4 +1,5 @@
 let onlineUsers = new Map(); // Maps userId -> Set of socket.ids
+let activeConversations = new Map(); // Maps socketId -> conversationId currently open
 const User = require("../models/User");
 
 const socketHandler = (io) => {
@@ -17,12 +18,34 @@ const socketHandler = (io) => {
             io.emit("onlineUsers", Array.from(onlineUsers.keys()));
         });
 
+        // Track which conversation the user is currently viewing (for unread logic)
+        socket.on("setActiveConversation", (conversationId) => {
+            if (conversationId) {
+                activeConversations.set(socket.id, conversationId);
+            } else {
+                activeConversations.delete(socket.id);
+            }
+        });
+
         // SEND MESSAGE
         socket.on("sendMessage", (message) => {
             const receiverSocketIds = onlineUsers.get(message.receiver);
             if (receiverSocketIds) {
                 receiverSocketIds.forEach((socketId) => {
                     io.to(socketId).emit("receiveMessage", message);
+
+                    // Only emit unread notification if receiver is NOT viewing this conversation
+                    const viewingConvId = activeConversations.get(socketId);
+                    const isViewingThisConv = viewingConvId === message.conversationId;
+
+                    if (!isViewingThisConv) {
+                        io.to(socketId).emit("newUnreadMessage", {
+                            conversationId: message.conversationId,
+                            sender: message.sender,
+                            text: message.text,
+                            image: message.image
+                        });
+                    }
                 });
             }
         });
@@ -69,6 +92,8 @@ const socketHandler = (io) => {
 
         // DISCONNECT
         socket.on("disconnect", async () => {
+            activeConversations.delete(socket.id);
+
             let disconnectedUserId = null;
             for (let [userId, socketIds] of onlineUsers) {
                 if (socketIds.has(socket.id)) {
