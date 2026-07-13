@@ -6,7 +6,7 @@ import { FiMessageSquare, FiUsers, FiSearch } from "react-icons/fi";
 
 function Sidebar({ setConversation, activeConversationId }) {
   const { user: currentUser } = useContext(AuthContext);
-  const { socket } = useContext(SocketContext);
+  const { socket, onlineUsers = [] } = useContext(SocketContext);
   
   const [activeTab, setActiveTab] = useState("chats"); // "chats" or "contacts"
   const [users, setUsers] = useState([]);
@@ -169,7 +169,7 @@ function Sidebar({ setConversation, activeConversationId }) {
                             className="rounded-circle"
                             style={{ objectFit: "cover" }}
                           />
-                          <span className={`avatar-status-badge ${otherUser.isOnline ? "online" : "offline"}`} />
+                           <span className={`avatar-status-badge ${onlineUsers.includes(otherUser._id) ? "online" : "offline"}`} />
                         </div>
                         
                         <div style={{ maxWidth: "160px" }}>
@@ -216,13 +216,13 @@ function Sidebar({ setConversation, activeConversationId }) {
                         className="rounded-circle"
                         style={{ objectFit: "cover" }}
                       />
-                      <span className={`avatar-status-badge ${u.isOnline ? "online" : "offline"}`} />
+                       <span className={`avatar-status-badge ${onlineUsers.includes(u._id) ? "online" : "offline"}`} />
                     </div>
 
                     <div>
                       <h6 className="mb-0 text-light fw-bold small">{u.name}</h6>
-                      <small className="text-secondary" style={{ fontSize: "0.7rem" }}>
-                        {u.isOnline ? "Online" : "Offline"}
+                       <small className="text-secondary" style={{ fontSize: "0.7rem" }}>
+                        {onlineUsers.includes(u._id) ? "Online" : "Offline"}
                       </small>
                     </div>
                   </div>

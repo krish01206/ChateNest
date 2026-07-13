@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { AuthContext } from "../context/AuthContext";
 import { SocketContext } from "../context/SocketContext";
 import { getMessages, sendMessageApi, deleteMessageApi, updateMessageApi } from "../services/chatService";
-import { FiSend, FiMessageSquare, FiSmile, FiPaperclip, FiMoreVertical } from "react-icons/fi";
+import { FiSend, FiMessageSquare, FiSmile, FiPaperclip, FiMoreVertical, FiClock, FiAlertCircle } from "react-icons/fi";
 
 const EMOJIS = [
   "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘",
@@ -13,12 +13,12 @@ const EMOJIS = [
 
 const isImageFile = (url) => {
   if (!url) return false;
-  return /\.(jpeg|jpg|gif|png|webp|svg|bmp|tiff|heic)/i.test(url) || url.includes("/image/");
+  return /\.(jpeg|jpg|gif|png|webp|svg|bmp|tiff|heic)/i.test(url) || url.includes("/image/") || url.startsWith("blob:");
 };
 
 function ChatBox({ conversation }) {
   const { user } = useContext(AuthContext);
-  const { socket } = useContext(SocketContext);
+  const { socket, onlineUsers = [] } = useContext(SocketContext);
 
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
@@ -29,39 +29,80 @@ function ChatBox({ conversation }) {
   const [activeContextMenu, setActiveContextMenu] = useState(null); // holds messageId
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editText, setEditText] = useState("");
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [isCurrentlyTyping, setIsCurrentlyTyping] = useState(false);
 
   const messagesEndRef = useRef(null);
   const typingTimeout = useRef();
   const fileInputRef = useRef(null);
+  const scrollContainerRef = useRef(null);
 
   const otherUser = conversation?.members?.find(
     (m) => m._id !== user?._id
   );
 
+  // Load messages with cleanup logic for race conditions
   useEffect(() => {
+    let active = true;
     if (conversation) {
-      loadMessages();
+      setMessages([]);
+      setLoadingMessages(true);
+
+      const load = async () => {
+        try {
+          const data = await getMessages(conversation._id);
+          if (active) {
+            setMessages(data.messages || []);
+            setLoadingMessages(false);
+            // Force scroll to bottom on initial load
+            setTimeout(() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+            }, 50);
+          }
+        } catch (err) {
+          console.log("Error loading messages:", err);
+          if (active) {
+            setLoadingMessages(false);
+          }
+        }
+      };
+
+      load();
     }
+
+    return () => {
+      active = false;
+    };
   }, [conversation]);
 
-  useEffect(() => {
-    scrollBottom();
-  }, [messages, typing]);
+  // Smart Auto-Scroll: only scroll if the user is already near the bottom,
+  // or if the updated messages trigger is caused by the user's own sent message.
+  const scrollBottom = (force = false) => {
+    if (!scrollContainerRef.current) return;
+    const container = scrollContainerRef.current;
+    
+    // Check if the user is close to the bottom (within 150px threshold)
+    const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight <= 150;
 
-  const scrollBottom = () => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
-  };
-
-  const loadMessages = async () => {
-    try {
-      const data = await getMessages(conversation._id);
-      setMessages(data.messages || []);
-    } catch (err) {
-      console.log("Error loading messages:", err);
+    if (force || isNearBottom) {
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({
+          behavior: "smooth",
+        });
+      }, 50);
     }
   };
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      const mine = (lastMessage.sender?._id || lastMessage.sender) === user?._id;
+      // Force scroll to bottom if the message is mine, otherwise scroll smartly
+      scrollBottom(mine);
+    } else {
+      scrollBottom(false);
+    }
+  }, [messages, typing]);
 
   useEffect(() => {
     const handleCloseMenu = () => setActiveContextMenu(null);
@@ -72,41 +113,47 @@ function ChatBox({ conversation }) {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("receiveMessage", (msg) => {
+    const handleReceiveMessage = (msg) => {
       // Only append if it belongs to this active conversation
       if (msg.conversationId === conversation?._id) {
         setMessages((prev) => [...prev, msg]);
       }
-    });
+    };
 
-    socket.on("typing", (sender) => {
+    const handleTypingEvent = (sender) => {
       if (sender === otherUser?._id) {
         setTyping(true);
       }
-    });
+    };
 
-    socket.on("stopTyping", (sender) => {
+    const handleStopTypingEvent = (sender) => {
       if (sender === otherUser?._id) {
         setTyping(false);
       }
-    });
+    };
 
-    socket.on("messageDeleted", (messageId) => {
+    const handleMessageDeletedEvent = (messageId) => {
       setMessages((prev) => prev.filter((m) => m._id !== messageId));
-    });
+    };
 
-    socket.on("messageUpdated", (updatedMsg) => {
+    const handleMessageUpdatedEvent = (updatedMsg) => {
       setMessages((prev) =>
         prev.map((m) => (m._id === updatedMsg._id ? updatedMsg : m))
       );
-    });
+    };
+
+    socket.on("receiveMessage", handleReceiveMessage);
+    socket.on("typing", handleTypingEvent);
+    socket.on("stopTyping", handleStopTypingEvent);
+    socket.on("messageDeleted", handleMessageDeletedEvent);
+    socket.on("messageUpdated", handleMessageUpdatedEvent);
 
     return () => {
-      socket.off("receiveMessage");
-      socket.off("typing");
-      socket.off("stopTyping");
-      socket.off("messageDeleted");
-      socket.off("messageUpdated");
+      socket.off("receiveMessage", handleReceiveMessage);
+      socket.off("typing", handleTypingEvent);
+      socket.off("stopTyping", handleStopTypingEvent);
+      socket.off("messageDeleted", handleMessageDeletedEvent);
+      socket.off("messageUpdated", handleMessageUpdatedEvent);
     };
   }, [socket, conversation, otherUser]);
 
@@ -115,10 +162,14 @@ function ChatBox({ conversation }) {
 
     if (!socket || !otherUser) return;
 
-    socket.emit("typing", {
-      receiver: otherUser._id,
-      sender: user._id,
-    });
+    // Premium typing throttle: only emit event once when typing starts
+    if (!isCurrentlyTyping) {
+      setIsCurrentlyTyping(true);
+      socket.emit("typing", {
+        receiver: otherUser._id,
+        sender: user._id,
+      });
+    }
 
     clearTimeout(typingTimeout.current);
 
@@ -127,6 +178,7 @@ function ChatBox({ conversation }) {
         receiver: otherUser._id,
         sender: user._id,
       });
+      setIsCurrentlyTyping(false);
     }, 1500);
   };
 
@@ -148,26 +200,56 @@ function ChatBox({ conversation }) {
   const sendMessage = async () => {
     if (!text.trim() && !selectedFile) return;
 
+    const messageText = text;
+    const fileToSend = selectedFile;
+    const previewUrl = filePreview;
+
+    // Instantly reset form state for responsiveness
+    setText("");
+    setSelectedFile(null);
+    setFilePreview("");
+    setShowEmojiPicker(false);
+
+    // Create optimistic mock message
+    const tempId = "temp-" + Date.now();
+    const tempMsg = {
+      _id: tempId,
+      conversationId: conversation._id,
+      sender: user._id,
+      receiver: otherUser._id,
+      text: messageText,
+      image: previewUrl || (fileToSend ? URL.createObjectURL(fileToSend) : null),
+      isTemp: true,
+      status: "sending",
+      createdAt: new Date().toISOString()
+    };
+
+    // Add optimistic message and force scroll viewport to bottom
+    setMessages((prev) => [...prev, tempMsg]);
+
     try {
       let data;
-      if (selectedFile) {
+      if (fileToSend) {
         const formData = new FormData();
         formData.append("conversationId", conversation._id);
         formData.append("receiver", otherUser._id);
-        formData.append("text", text);
-        formData.append("file", selectedFile);
+        formData.append("text", messageText);
+        formData.append("file", fileToSend);
 
         data = await sendMessageApi(formData);
       } else {
         const payload = {
           conversationId: conversation._id,
           receiver: otherUser._id,
-          text,
+          text: messageText,
         };
         data = await sendMessageApi(payload);
       }
 
-      setMessages((prev) => [...prev, data.message]);
+      // Replace optimistic entry with backend database payload
+      setMessages((prev) =>
+        prev.map((m) => (m._id === tempId ? data.message : m))
+      );
 
       if (socket) {
         socket.emit("sendMessage", data.message);
@@ -175,14 +257,14 @@ function ChatBox({ conversation }) {
           receiver: otherUser._id,
           sender: user._id,
         });
+        setIsCurrentlyTyping(false);
       }
-
-      setText("");
-      setSelectedFile(null);
-      setFilePreview("");
-      setShowEmojiPicker(false);
     } catch (err) {
       console.log("Error sending message:", err);
+      // Mark optimistic message as failed
+      setMessages((prev) =>
+        prev.map((m) => (m._id === tempId ? { ...m, status: "error" } : m))
+      );
     }
   };
 
@@ -266,6 +348,72 @@ function ChatBox({ conversation }) {
     );
   }
 
+  if (loadingMessages) {
+    return (
+      <div className="d-flex flex-column h-100" style={{ background: "rgba(15, 23, 42, 0.1)" }}>
+        
+        {/* Header (Skeleton) */}
+        <div className="border-bottom p-3 d-flex justify-content-between align-items-center" style={{ borderColor: "var(--border-glass) !important", background: "rgba(15, 23, 42, 0.45)" }}>
+          <div className="d-flex align-items-center gap-3">
+            <div className="skeleton-avatar" />
+            <div>
+              <div className="skeleton-line" style={{ width: "120px", height: "14px", marginBottom: "6px" }} />
+              <div className="skeleton-line" style={{ width: "60px", height: "10px" }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Message Thread (Skeleton) */}
+        <div
+          className="flex-grow-1 p-3 d-flex flex-column gap-3"
+          style={{
+            overflowY: "auto",
+            background: "rgba(8, 10, 16, 0.6)",
+          }}
+        >
+          <div className="d-flex justify-content-start">
+            <div className="skeleton-bubble other animate-fade-in-up" style={{ width: "45%", height: "50px" }} />
+          </div>
+          <div className="d-flex justify-content-end">
+            <div className="skeleton-bubble mine animate-fade-in-up" style={{ width: "35%", height: "45px" }} />
+          </div>
+          <div className="d-flex justify-content-start">
+            <div className="skeleton-bubble other animate-fade-in-up" style={{ width: "60%", height: "70px" }} />
+          </div>
+          <div className="d-flex justify-content-end">
+            <div className="skeleton-bubble mine animate-fade-in-up" style={{ width: "50%", height: "55px" }} />
+          </div>
+          <div className="d-flex justify-content-start">
+            <div className="skeleton-bubble other animate-fade-in-up" style={{ width: "30%", height: "40px" }} />
+          </div>
+        </div>
+
+        {/* Form Input controls (Skeleton/Disabled state) */}
+        <div className="border-top p-3 d-flex align-items-center gap-2" style={{ borderColor: "var(--border-glass) !important", background: "rgba(15, 23, 42, 0.45)", opacity: 0.6 }}>
+          <button className="btn btn-link p-1 text-secondary" disabled>
+            <FiPaperclip size={18} />
+          </button>
+          <button className="btn btn-link p-1 text-secondary me-1" disabled>
+            <FiSmile size={18} />
+          </button>
+          <input
+            type="text"
+            className="form-control premium-input flex-grow-1"
+            placeholder="Loading secure message history..."
+            disabled
+          />
+          <button
+            className="premium-btn-primary d-flex align-items-center justify-content-center p-3"
+            style={{ borderRadius: "50%", width: "42px", height: "42px", opacity: 0.5 }}
+            disabled
+          >
+            <FiSend size={16} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="d-flex flex-column h-100" style={{ background: "rgba(15, 23, 42, 0.1)" }}>
       
@@ -281,13 +429,13 @@ function ChatBox({ conversation }) {
               className="rounded-circle"
               style={{ objectFit: "cover" }}
             />
-            <span className={`avatar-status-badge ${otherUser?.isOnline ? "online" : "offline"}`} />
+            <span className={`avatar-status-badge ${onlineUsers.includes(otherUser?._id) ? "online" : "offline"}`} />
           </div>
 
           <div>
             <h6 className="mb-0 text-light fw-bold">{otherUser?.name}</h6>
-            <small className={otherUser?.isOnline ? "text-success" : "text-secondary"} style={{ fontSize: "0.75rem", fontWeight: "500" }}>
-              {otherUser?.isOnline ? "Online" : "Offline"}
+            <small className={onlineUsers.includes(otherUser?._id) ? "text-success" : "text-secondary"} style={{ fontSize: "0.75rem", fontWeight: "500" }}>
+              {onlineUsers.includes(otherUser?._id) ? "Online" : "Offline"}
             </small>
           </div>
         </div>
@@ -295,6 +443,7 @@ function ChatBox({ conversation }) {
 
       {/* Messages List Area */}
       <div
+        ref={scrollContainerRef}
         className="flex-grow-1 p-3 d-flex flex-column gap-3"
         style={{
           overflowY: "auto",
@@ -316,7 +465,7 @@ function ChatBox({ conversation }) {
               >
                 <div className="d-flex flex-column position-relative message-container-wrapper" style={{ maxWidth: "60%", width: "fit-content" }}>
                   
-                  {mine && !editingMessageId && (
+                  {mine && !editingMessageId && !m.isTemp && (
                     <button 
                       className="btn btn-link p-1 text-secondary message-menu-btn" 
                       style={{ position: "absolute", left: "-30px", top: "50%", transform: "translateY(-50%)", border: "none", background: "none" }}
@@ -361,7 +510,13 @@ function ChatBox({ conversation }) {
                     </div>
                   )}
 
-                  <div className={`message-bubble ${mine ? "mine" : "other"}`}>
+                  <div 
+                    className={`message-bubble ${mine ? "mine" : "other"}`}
+                    style={{
+                      opacity: m.status === "sending" ? 0.65 : 1,
+                      border: m.status === "error" ? "1px solid rgba(220, 53, 69, 0.5)" : undefined,
+                    }}
+                  >
                     {editingMessageId === m._id ? (
                       <div className="d-flex flex-column gap-2 p-1" style={{ minWidth: "200px" }}>
                         <input 
@@ -428,10 +583,14 @@ function ChatBox({ conversation }) {
                       </>
                     )}
                   </div>
-                  <small className="text-secondary mt-1 px-1" style={{ fontSize: "0.6rem", alignSelf: mine ? "flex-end" : "flex-start" }}>
-                    {formatMessageTime(m.createdAt || new Date())}
-                    {m.isEdited && <span className="ms-1 text-secondary opacity-75">(edited)</span>}
-                  </small>
+                  <div className="d-flex align-items-center gap-1 mt-1 px-1" style={{ alignSelf: mine ? "flex-end" : "flex-start" }}>
+                    <small className="text-secondary" style={{ fontSize: "0.6rem" }}>
+                      {formatMessageTime(m.createdAt || new Date())}
+                      {m.isEdited && <span className="ms-1 text-secondary opacity-75">(edited)</span>}
+                    </small>
+                    {m.status === "sending" && <FiClock size={10} className="text-secondary animate-pulse-offline" />}
+                    {m.status === "error" && <FiAlertCircle size={12} className="text-danger" title="Message failed to send" />}
+                  </div>
                 </div>
               </div>
             );

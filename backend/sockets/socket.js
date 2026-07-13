@@ -1,184 +1,106 @@
-let onlineUsers = new Map();
-const User =
-require("../models/User");
+let onlineUsers = new Map(); // Maps userId -> Set of socket.ids
+const User = require("../models/User");
 
 const socketHandler = (io) => {
-
     io.on("connection", (socket) => {
-
         console.log("User Connected:", socket.id);
 
         // USER ONLINE
-       socket.on(
-    "join",
-    async (userId) => {
-
-        onlineUsers.set(
-            userId,
-            socket.id
-        );
-
-        await User.findByIdAndUpdate(
-            userId,
-            {
-                isOnline: true
+        socket.on("join", async (userId) => {
+            if (!onlineUsers.has(userId)) {
+                onlineUsers.set(userId, new Set());
             }
-        );
+            onlineUsers.get(userId).add(socket.id);
 
-        io.emit(
-            "onlineUsers",
-            Array.from(
-                onlineUsers.keys()
-            )
-        );
+            await User.findByIdAndUpdate(userId, { isOnline: true });
 
-    }
-);
+            io.emit("onlineUsers", Array.from(onlineUsers.keys()));
+        });
 
         // SEND MESSAGE
         socket.on("sendMessage", (message) => {
-
-            const receiverSocketId =
-                onlineUsers.get(
-                    message.receiver
-                );
-
-            if (receiverSocketId) {
-
-                io.to(receiverSocketId)
-                    .emit(
-                        "receiveMessage",
-                        message
-                    );
-
+            const receiverSocketIds = onlineUsers.get(message.receiver);
+            if (receiverSocketIds) {
+                receiverSocketIds.forEach((socketId) => {
+                    io.to(socketId).emit("receiveMessage", message);
+                });
             }
-
         });
 
         // TYPING
-        socket.on(
-            "typing",
-            ({ receiver, sender }) => {
-
-                const receiverSocketId =
-                    onlineUsers.get(receiver);
-
-                if (receiverSocketId) {
-
-                    io.to(receiverSocketId)
-                        .emit(
-                            "typing",
-                            sender
-                        );
-
-                }
-
+        socket.on("typing", ({ receiver, sender }) => {
+            const receiverSocketIds = onlineUsers.get(receiver);
+            if (receiverSocketIds) {
+                receiverSocketIds.forEach((socketId) => {
+                    io.to(socketId).emit("typing", sender);
+                });
             }
-        );
+        });
 
         // STOP TYPING
-        socket.on(
-            "stopTyping",
-            ({ receiver, sender }) => {
-
-                const receiverSocketId =
-                    onlineUsers.get(receiver);
-
-                if (receiverSocketId) {
-
-                    io.to(receiverSocketId)
-                        .emit(
-                            "stopTyping",
-                            sender
-                        );
-
-                }
-
+        socket.on("stopTyping", ({ receiver, sender }) => {
+            const receiverSocketIds = onlineUsers.get(receiver);
+            if (receiverSocketIds) {
+                receiverSocketIds.forEach((socketId) => {
+                    io.to(socketId).emit("stopTyping", sender);
+                });
             }
-        );
+        });
+
         // DELETE MESSAGE
-        socket.on(
-            "deleteMessage",
-            ({ messageId, receiver }) => {
-                const receiverSocketId = onlineUsers.get(receiver);
-                if (receiverSocketId) {
-                    io.to(receiverSocketId).emit("messageDeleted", messageId);
-                }
+        socket.on("deleteMessage", ({ messageId, receiver }) => {
+            const receiverSocketIds = onlineUsers.get(receiver);
+            if (receiverSocketIds) {
+                receiverSocketIds.forEach((socketId) => {
+                    io.to(socketId).emit("messageDeleted", messageId);
+                });
             }
-        );
+        });
 
         // UPDATE MESSAGE
-        socket.on(
-            "updateMessage",
-            ({ message, receiver }) => {
-                const receiverSocketId = onlineUsers.get(receiver);
-                if (receiverSocketId) {
-                    io.to(receiverSocketId).emit("messageUpdated", message);
+        socket.on("updateMessage", ({ message, receiver }) => {
+            const receiverSocketIds = onlineUsers.get(receiver);
+            if (receiverSocketIds) {
+                receiverSocketIds.forEach((socketId) => {
+                    io.to(socketId).emit("messageUpdated", message);
+                });
+            }
+        });
+
+        // DISCONNECT
+        socket.on("disconnect", async () => {
+            let disconnectedUserId = null;
+            for (let [userId, socketIds] of onlineUsers) {
+                if (socketIds.has(socket.id)) {
+                    socketIds.delete(socket.id);
+                    if (socketIds.size === 0) {
+                        onlineUsers.delete(userId);
+                        disconnectedUserId = userId;
+                    }
+                    break;
                 }
             }
-        );
 
-        socket.on(
-    "disconnect",
-    async () => {
-
-        for (
-            let [userId, socketId]
-            of onlineUsers
-        ) {
-
-            if (
-                socketId === socket.id
-            ) {
-
-                onlineUsers.delete(
-                    userId
-                );
-
-                await User.findByIdAndUpdate(
-                    userId,
-                    {
-                        isOnline: false,
-                        lastSeen: new Date()
-                    }
-                );
-
-                break;
+            if (disconnectedUserId) {
+                await User.findByIdAndUpdate(disconnectedUserId, {
+                    isOnline: false,
+                    lastSeen: new Date()
+                });
             }
-        }
 
-        io.emit(
-            "onlineUsers",
-            Array.from(
-                onlineUsers.keys()
-            )
-        );
+            io.emit("onlineUsers", Array.from(onlineUsers.keys()));
+        });
 
-    }
-);
-
-socket.on(
-    "messageSeen",
-    ({ messageId, sender }) => {
-
-        const senderSocketId =
-            onlineUsers.get(sender);
-
-        if (senderSocketId) {
-
-            io.to(senderSocketId)
-                .emit(
-                    "messageSeen",
-                    messageId
-                );
-
-        }
-
-    }
-);
-
+        // MESSAGE SEEN
+        socket.on("messageSeen", ({ messageId, sender }) => {
+            const senderSocketIds = onlineUsers.get(sender);
+            if (senderSocketIds) {
+                senderSocketIds.forEach((socketId) => {
+                    io.to(socketId).emit("messageSeen", messageId);
+                });
+            }
+        });
     });
-
 };
 
 module.exports = socketHandler;

@@ -13,6 +13,7 @@ export const SocketContext = createContext();
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState([]);
   const { user } = useContext(AuthContext);
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export const SocketProvider = ({ children }) => {
         socket.disconnect();
         setSocket(null);
         setIsConnected(false);
+        setOnlineUsers([]);
       }
       return;
     }
@@ -46,14 +48,20 @@ export const SocketProvider = ({ children }) => {
       newSocket.emit("join", user._id);
     });
 
+    newSocket.on("onlineUsers", (users) => {
+      setOnlineUsers(users);
+    });
+
     newSocket.on("disconnect", () => {
       console.log("Socket Disconnected");
       setIsConnected(false);
+      setOnlineUsers([]);
     });
 
     newSocket.on("connect_error", (err) => {
       console.error("Socket Connection Error:", err.message);
       setIsConnected(false);
+      setOnlineUsers([]);
     });
 
     setSocket(newSocket);
@@ -64,7 +72,7 @@ export const SocketProvider = ({ children }) => {
   }, [user]); // Re-run when auth state changes
 
   return (
-    <SocketContext.Provider value={{ socket, isConnected }}>
+    <SocketContext.Provider value={{ socket, isConnected, onlineUsers }}>
       {children}
     </SocketContext.Provider>
   );
