@@ -6,17 +6,12 @@ dotenv.config({
     path: path.resolve(__dirname, ".env")
 });
 
-console.log("Cloud:", process.env.CLOUDINARY_CLOUD_NAME);
-
 const cors = require("cors");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const rateLimit = require("express-rate-limit");
-const userRoutes=require("./routes/userRoutes");
+const userRoutes = require("./routes/userRoutes");
 const messageRoutes = require("./routes/messageRoutes");
-
-
-dotenv.config();
 
 const connectDB = require("./config/db");
 
@@ -51,7 +46,9 @@ const limiter = rateLimit({
     max: 100
 });
 
-app.use(limiter);
+// Scope limiter to /api only — do NOT apply globally
+// (global application blocks Socket.IO handshake requests)
+app.use("/api", limiter);
 
 app.get("/", (req, res) => {
 
