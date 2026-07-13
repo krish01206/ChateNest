@@ -63,6 +63,7 @@ exports.getConversations = async (req, res) => {
 // Send Message
 
 exports.sendMessage = async (req, res) => {
+console.log(req.body);
     try {
 
         const {

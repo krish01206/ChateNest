@@ -13,13 +13,16 @@ const PORT =
 const server =
     http.createServer(app);
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://chate-nest.vercel.app",
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
 const io = new Server(server, {
 
     cors: {
-  origin: [
-    "http://localhost:5173",
-    "https://chate-nest.vercel.app",
-  ],
+  origin: allowedOrigins,
   credentials: true,
 }
 
