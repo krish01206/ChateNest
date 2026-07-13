@@ -95,6 +95,7 @@ const socketHandler = (io) => {
                 }
 
             }
+        );
         // DELETE MESSAGE
         socket.on(
             "deleteMessage",
